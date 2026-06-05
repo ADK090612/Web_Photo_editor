@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ADK Editor</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+
+    <style>
+        :root {
+            --bg-dark: #121212;
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.15);
+            --accent-color: #a855f7;
+        }
+
+        * { font-family: 'Pretendard', -apple-system, sans-serif; box-sizing: border-box; }
+        body { background-color: var(--bg-dark); color: #fff; overflow: hidden; touch-action: none; margin: 0; }
+
+        /* 배경 블러 이펙트 */
+        .bg-circle { position: absolute; border-radius: 50%; filter: blur(80px); z-index: -1; }
+        .circle-1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: rgba(168, 85, 247, 0.2); }
+        .circle-2 { bottom: -10%; right: -10%; width: 40vw; height: 40vw; background: rgba(59, 130, 246, 0.2); }
+
+        /* 개선된 Glass Panel */
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+        }
+
+        /* 신규 Glass Button */
+        .glass-btn {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), inset 0 1px 2px rgba(255, 255, 255, 0.15);
+            transition: all 0.3s ease;
+        }
+        .glass-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.3);
+        }
+
+        /* 커스텀 Range 슬라이더 */
+        input[type="range"] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #ffffff; margin-top: -6px; box-shadow: 0 0 10px rgba(0,0,0,0.5); cursor: pointer; }
+        
+        .hidden-menu { display: none !important; }
+        
+        #curveCanvas { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 12px; cursor: crosshair; touch-action: none; width: 100%; }
+        
+        canvas#mainCanvas { max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+
+        /* Scrollbar customizing */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
+
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+    <div class="bg-circle circle-1"></div>
+    <div class="bg-circle circle-2"></div>
+
+    <input type="file" id="fileInput" accept="image/*" class="hidden">
+
+    <div id="exportModal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="glass-panel p-6 rounded-2xl w-[90%] max-w-sm flex flex-col gap-5">
+            <h3 class="text-xl font-bold text-white">Export Image</h3>
+            
+            <div class="flex flex-col gap-2">
+                <label class="text-sm text-gray-300">File Format</label>
+                <select id="exportFormat" class="bg-black/50 text-white rounded-lg p-3 outline-none border border-white/20 focus:border-purple-400">
+                    <option value="image/png">PNG</option>
+                    <option value="image/jpeg">JPEG</option>
+                    <option value="image/webp">WEBP</option>
+                </select>
+            </div>
+            
+            <div class="flex flex-col gap-2">
+                <label class="text-sm text-gray-300">Resolution</label>
+                <select id="exportScale" class="bg-black/50 text-white rounded-lg p-3 outline-none border border-white/20 focus:border-purple-400">
+                    <option value="1">원본 크기 (100%)</option>
+                    <option value="0.5">절반 크기 (50%)</option>
+                    <option value="2">2배 확대 (200%)</option>
+                </select>
+            </div>
+            
+            <div class="flex gap-3 mt-2">
+                <button id="btnCancelExport" class="flex-1 py-3 glass-btn rounded-lg text-sm font-semibold">취소</button>
+                <button id="btnConfirmExport" class="flex-1 py-3 bg-purple-500 hover:bg-purple-600 rounded-lg text-sm font-bold shadow-lg transition">다운로드</button>
+            </div>
+        </div>
+    </div>
+
+    <nav class="w-full glass-panel flex justify-between items-center px-4 py-3 z-50 shrink-0">
+        <button id="btnUpload" class="text-white p-2 glass-btn rounded-full transition">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </button>
+        <div class="flex gap-4">
+            <button id="btnUndo" class="text-white/50 p-2 pointer-events-none transition" disabled>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+            </button>
+            <button id="btnRedo" class="text-white/50 p-2 pointer-events-none transition" disabled>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
+            </button>
+        </div>
+        <button id="btnSave" class="text-purple-400 text-sm font-bold px-4 py-2 glass-btn rounded-full transition">
+            Export
+        </button>
+    </nav>
+
+    <div class="flex flex-col lg:flex-row flex-1 overflow-hidden relative">
+        
+        <div id="workspace" class="flex-1 relative flex items-center justify-center p-4 overflow-hidden bg-black/20">
+            <div id="dropZone" class="absolute inset-4 max-w-xl mx-auto my-auto h-[300px] flex flex-col items-center justify-center glass-panel rounded-2xl border-dashed border-2 border-white/30 text-center z-10 transition-all">
+                <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-white/50 mb-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <p class="text-gray-200 text-lg font-medium mb-6">이곳에 이미지를 끌어 놓으세요.</p>
+                <button id="btnLoadFileDrop" class="glass-btn px-6 py-3 rounded-full text-purple-400 font-bold text-sm">
+                    내 파일에서 파일 불러오기
+                </button>
+            </div>
+
+            <canvas id="mainCanvas" class="hidden"></canvas>
+            <img id="cropperImage" class="hidden max-w-full max-h-full">
+        </div>
+
+        <div class="w-full lg:w-[350px] lg:border-l border-white/10 flex flex-col-reverse lg:flex-col shrink-0 z-40 lg:h-full bg-[#121212]/80 backdrop-blur-md absolute bottom-0 lg:relative transition-transform duration-300 pb-2 lg:pb-0">
+            
+            <div class="glass-panel mx-4 lg:mx-0 lg:rounded-none rounded-full flex justify-between px-2 py-2 mb-2 mt-2 lg:mt-0 lg:mb-0 lg:border-t-0 lg:border-x-0 shadow-lg lg:shadow-none z-10">
+                <button class="tab-btn flex flex-col items-center p-2 flex-1 text-purple-400" data-target="panelLight">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                    <span class="text-[9px] mt-1 font-semibold">Light</span>
+                </button>
+                <button class="tab-btn flex flex-col items-center p-2 flex-1 text-gray-400" data-target="panelColor">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                    <span class="text-[9px] mt-1 font-semibold">Color</span>
+                </button>
+                <button class="tab-btn flex flex-col items-center p-2 flex-1 text-gray-400" data-target="panelEffects">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    <span class="text-[9px] mt-1 font-semibold">Effects</span>
+                </button>
+                <button class="tab-btn flex flex-col items-center p-2 flex-1 text-gray-400" data-target="panelCrop">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>
+                    <span class="text-[9px] mt-1 font-semibold">Crop</span>
+                </button>
+            </div>
+
+            <div id="controlPanel" class="flex-1 overflow-y-auto custom-scrollbar p-4 glass-panel mx-4 mb-0 mt-0 lg:m-0 lg:rounded-none rounded-2xl max-h-[40vh] lg:max-h-full">
+                
+                <div id="panelLight" class="control-view flex flex-col gap-4">
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Exposure</span><span id="valExposure">0</span></div>
+                        <input type="range" id="slExposure" min="-100" max="100" value="0">
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Contrast</span><span id="valContrast">0</span></div>
+                        <input type="range" id="slContrast" min="-100" max="100" value="0">
+                    </div>
+                    <hr class="border-white/10 my-1">
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Highlights</span><span id="valHighlights">0</span></div>
+                        <input type="range" id="slHighlights" min="-100" max="100" value="0">
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Shadows</span><span id="valShadows">0</span></div>
+                        <input type="range" id="slShadows" min="-100" max="100" value="0">
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Whites</span><span id="valWhites">0</span></div>
+                        <input type="range" id="slWhites" min="-100" max="100" value="0">
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Blacks</span><span id="valBlacks">0</span></div>
+                        <input type="range" id="slBlacks" min="-100" max="100" value="0">
+                    </div>
+                    <hr class="border-white/10 my-1">
+                    <div class="flex flex-col items-center mt-2">
+                        <div class="w-full flex justify-between items-center mb-2">
+                            <span class="text-sm font-semibold">Point Curve</span>
+                            <button id="btnResetCurve" class="text-[10px] glass-btn px-2 py-1 rounded">Reset</button>
+                        </div>
+                        <canvas id="curveCanvas" height="200"></canvas>
+                    </div>
+                </div>
+
+                <div id="panelColor" class="control-view hidden-menu flex flex-col gap-4">
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Temp</span><span id="valTemp">0</span></div>
+                        <input type="range" id="slTemp" min="-100" max="100" value="0" style="background: linear-gradient(90deg, #3b82f6, #fcd34d); border-radius:2px; height:3px;">
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Tint</span><span id="valTint">0</span></div>
+                        <input type="range" id="slTint" min="-100" max="100" value="0" style="background: linear-gradient(90deg, #22c55e, #d946ef); border-radius:2px; height:3px;">
+                    </div>
+                    <hr class="border-white/10 my-1">
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Vibrance</span><span id="valVibrance">0</span></div>
+                        <input type="range" id="slVibrance" min="-100" max="100" value="0">
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Saturation</span><span id="valSat">0</span></div>
+                        <input type="range" id="slSat" min="-100" max="100" value="0">
+                    </div>
+                </div>
+
+                <div id="panelEffects" class="control-view hidden-menu flex flex-col gap-4">
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Vignette</span><span id="valVignette">0</span></div>
+                        <input type="range" id="slVignette" min="-100" max="100" value="0">
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Grain</span><span id="valGrain">0</span></div>
+                        <input type="range" id="slGrain" min="0" max="100" value="0">
+                    </div>
+                </div>
+
+                <div id="panelCrop" class="control-view hidden-menu flex flex-col gap-4">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs text-gray-400">Aspect Ratio</span>
+                        <div class="flex gap-1 bg-white/5 p-1 rounded">
+                            <button id="btnRatioLand" class="text-[10px] px-2 py-1 rounded bg-white/30 transition">가로</button>
+                            <button id="btnRatioPort" class="text-[10px] px-2 py-1 rounded transition">세로</button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-4 gap-2">
+                        <button class="crop-ratio py-2 glass-btn rounded text-xs bg-white/30" data-ratio="NaN">Free</button>
+                        <button class="crop-ratio py-2 glass-btn rounded text-xs" data-ratio="1">1:1</button>
+                        <button class="crop-ratio py-2 glass-btn rounded text-xs" data-ratio="1.3333">4:3</button>
+                        <button class="crop-ratio py-2 glass-btn rounded text-xs" data-ratio="1.7777">16:9</button>
+                    </div>
+                    
+                    <hr class="border-white/10 my-1">
+                    
+                    <span class="text-xs text-gray-400">Transform</span>
+                    <div class="flex gap-2">
+                        <button id="btnRotate" class="flex-1 py-2 glass-btn rounded flex justify-center" title="Rotate 90°">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        </button>
+                        <button id="btnFlipX" class="flex-1 py-2 glass-btn rounded flex justify-center" title="Flip Horizontal">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M3 8l4-4 4 4"/><path d="M21 16l-4 4-4-4"/></svg>
+                        </button>
+                        <button id="btnFlipY" class="flex-1 py-2 glass-btn rounded flex justify-center" title="Flip Vertical">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18"/><path d="M8 3l4 4 4-4"/><path d="M16 21l-4-4-4 4"/></svg>
+                        </button>
+                    </div>
+
+                    <div class="flex flex-col gap-1 mt-2">
+                        <div class="flex justify-between text-xs text-gray-300"><span>Tilt</span><span id="valTilt">0°</span></div>
+                        <input type="range" id="slTilt" min="-45" max="45" value="0">
+                    </div>
+
+                    <button id="btnApplyCrop" class="w-full mt-4 py-3 bg-purple-500 text-white font-bold rounded shadow-lg hover:bg-purple-600 transition">Apply Crop</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 전역 상태 및 캔버스 초기화 ---
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        let originalImage = new Image();
+        let originalFileName = 'image';
+        let baseImageData = null; 
+        let cropper = null;
+
+        // 모든 슬라이더 상태 통합 관리
+        let currentSettings = {
+            exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0,
+            temp: 0, tint: 0, vibrance: 0, sat: 0,
+            vignette: 0, grain: 0,
+            curvePoints: [{x: 0, y: 255}, {x: 128, y: 127}, {x: 255, y: 0}]
+        };
+
+        const historyStack = [];
+        let historyIndex = -1;
+
+        originalImage.crossOrigin = "Anonymous";
+        
+        originalImage.onload = () => { 
+            initCanvas(originalImage); 
+            saveHistoryState(); 
+            document.getElementById('dropZone').classList.add('hidden');
+            canvas.classList.remove('hidden');
+        };
+
+        function initCanvas(img) {
+            const MAX_SIZE = 1400;
+            let width = img.width, height = img.height;
+            if (width > height && width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } 
+            else if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+            canvas.width = width; canvas.height = height;
+            ctx.drawImage(img, 0, 0, width, height);
+            baseImageData = ctx.getImageData(0, 0, width, height);
+            applyFilters();
+        }
+
+        // --- 파일 업로드 (드래그 앤 드롭 & 파일 버튼) ---
+        function handleFile(file) {
+            if (!file || !file.type.startsWith('image/')) return;
+            originalFileName = file.name.split('.')[0];
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                originalImage.src = event.target.result;
+                historyStack.length = 0; historyIndex = -1;
+                resetAllSliders();
+            }
+            reader.readAsDataURL(file);
+        }
+
+        document.getElementById('btnUpload').addEventListener('click', () => document.getElementById('fileInput').click());
+        document.getElementById('btnLoadFileDrop').addEventListener('click', () => document.getElementById('fileInput').click());
+        
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+        });
+
+        const dropZone = document.getElementById('dropZone');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            document.body.addEventListener(eventName, preventDefaults, false);
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('bg-white/10', 'border-white/60'));
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('bg-white/10', 'border-white/60'));
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            let dt = e.dataTransfer;
+            let files = dt.files;
+            if(files.length > 0) handleFile(files[0]);
+        });
+
+        function resetAllSliders() {
+            document.querySelectorAll('#panelLight input[type=range], #panelColor input[type=range], #panelEffects input[type=range]').forEach(el => { 
+                el.value = 0; document.getElementById('val'+el.id.replace('sl','')).innerText = '0'; 
+            });
+            currentSettings = { exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, temp: 0, tint: 0, vibrance: 0, sat: 0, vignette: 0, grain: 0, curvePoints: [{x: 0, y: 255}, {x: 128, y: 127}, {x: 255, y: 0}] };
+            drawCurveGrid();
+        }
+
+        // --- 슬라이더 이벤트 바인딩 ---
+        const sliderKeys = ['Exposure', 'Contrast', 'Highlights', 'Shadows', 'Whites', 'Blacks', 'Temp', 'Tint', 'Vibrance', 'Sat', 'Vignette', 'Grain'];
+        sliderKeys.forEach(key => {
+            const sl = document.getElementById('sl' + key);
+            const val = document.getElementById('val' + key);
+            if(sl) {
+                sl.addEventListener('input', (e) => {
+                    val.innerText = e.target.value;
+                    currentSettings[key.toLowerCase()] = parseInt(e.target.value);
+                    applyFilters();
+                });
+                sl.addEventListener('change', saveHistoryState);
+            }
+        });
+
+        // --- 픽셀 단위 이미지 처리 엔진 ---
+        function applyFilters() {
+            if (!baseImageData) return;
+            const imageData = new ImageData(new Uint8ClampedArray(baseImageData.data), baseImageData.width, baseImageData.height);
+            const data = imageData.data;
+            
+            const exp = currentSettings.exposure * 1.5; 
+            const cont = currentSettings.contrast;
+            const cFactor = (259 * (cont + 255)) / (255 * (259 - cont));
+            
+            const hl = currentSettings.highlights / 100;
+            const sh = currentSettings.shadows / 100;
+            const wh = currentSettings.whites / 100;
+            const bl = currentSettings.blacks / 100;
+            
+            const temp = currentSettings.temp * 0.5;
+            const tint = currentSettings.tint * 0.5;
+            const sat = currentSettings.sat / 100;
+            const vib = currentSettings.vibrance / 100;
+            const grain = currentSettings.grain;
+
+            const lut = createCurveLUT();
+            
+            const wPoint = 255 - (wh * 60); 
+            const bPoint = (bl * 60);
+
+            for (let i = 0; i < data.length; i += 4) {
+                let r = data[i], g = data[i+1], b = data[i+2];
+
+                r = lut[r]; g = lut[g]; b = lut[b];
+
+                r += temp; b -= temp; 
+                g += tint;
+
+                r += exp; g += exp; b += exp;
+
+                r = cFactor * (r - 128) + 128;
+                g = cFactor * (g - 128) + 128;
+                b = cFactor * (b - 128) + 128;
+
+                let L = 0.299 * r + 0.587 * g + 0.114 * b;
+                let lNorm = L / 255;
+
+                if (hl !== 0 && lNorm > 0.5) {
+                    let f = (lNorm - 0.5) * 2;
+                    r += (255 - r) * hl * f * 0.5;
+                    g += (255 - g) * hl * f * 0.5;
+                    b += (255 - b) * hl * f * 0.5;
+                }
+                if (sh !== 0 && lNorm < 0.5) {
+                    let f = (0.5 - lNorm) * 2;
+                    r += r * sh * f * 0.5;
+                    g += g * sh * f * 0.5;
+                    b += b * sh * f * 0.5;
+                }
+
+                r = ((r - bPoint) / (wPoint - bPoint)) * 255;
+                g = ((g - bPoint) / (wPoint - bPoint)) * 255;
+                b = ((b - bPoint) / (wPoint - bPoint)) * 255;
+
+                let maxC = Math.max(r, g, b);
+                let minC = Math.min(r, g, b);
+                let currentSat = (maxC - minC) / 255;
+                
+                L = 0.299 * r + 0.587 * g + 0.114 * b;
+                
+                if (vib !== 0) {
+                    let vFactor = vib * (1 - currentSat); 
+                    r += (r - L) * vFactor;
+                    g += (g - L) * vFactor;
+                    b += (b - L) * vFactor;
+                }
+                
+                if (sat !== 0) {
+                    r = L + (r - L) * (1 + sat);
+                    g = L + (g - L) * (1 + sat);
+                    b = L + (b - L) * (1 + sat);
+                }
+
+                if (grain > 0) {
+                    let noise = (Math.random() - 0.5) * grain;
+                    r += noise; g += noise; b += noise;
+                }
+
+                data[i] = r; data[i+1] = g; data[i+2] = b;
+            }
+            ctx.putImageData(imageData, 0, 0);
+
+            const vig = currentSettings.vignette / 100;
+            if (vig !== 0) {
+                ctx.globalCompositeOperation = vig < 0 ? 'multiply' : 'screen';
+                let cx = canvas.width / 2;
+                let cy = canvas.height / 2;
+                let rMax = Math.sqrt(cx*cx + cy*cy);
+                let grad = ctx.createRadialGradient(cx, cy, rMax * 0.4, cx, cy, rMax);
+                let alpha = Math.abs(vig) * 0.8;
+                grad.addColorStop(0, 'rgba(0,0,0,0)');
+                grad.addColorStop(1, vig < 0 ? `rgba(0,0,0,${alpha})` : `rgba(255,255,255,${alpha})`);
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.globalCompositeOperation = 'source-over';
+            }
+        }
+
+        // --- 톤 곡선 (Point Curve) ---
+        const cCanvas = document.getElementById('curveCanvas');
+        const cCtx = cCanvas.getContext('2d');
+        let dragPoint = null;
+
+        function resizeCurveCanvas() {
+            const parentWidth = cCanvas.parentElement.clientWidth;
+            cCanvas.width = parentWidth;
+            drawCurveGrid();
+        }
+        window.addEventListener('resize', resizeCurveCanvas);
+
+        function drawCurveGrid() {
+            let w = cCanvas.width; let h = cCanvas.height;
+            cCtx.clearRect(0, 0, w, h);
+            cCtx.strokeStyle = 'rgba(255,255,255,0.1)'; cCtx.lineWidth = 1;
+            cCtx.beginPath();
+            for(let i=1; i<4; i++) {
+                cCtx.moveTo(i*(w/4), 0); cCtx.lineTo(i*(w/4), h);
+                cCtx.moveTo(0, i*(h/4)); cCtx.lineTo(w, i*(h/4));
+            }
+            cCtx.stroke();
+
+            cCtx.strokeStyle = 'rgba(255,255,255,0.2)'; cCtx.beginPath();
+            cCtx.moveTo(0, h); cCtx.lineTo(w, 0); cCtx.stroke();
+
+            cCtx.strokeStyle = '#fff'; cCtx.lineWidth = 2; cCtx.beginPath();
+            let pts = [...currentSettings.curvePoints].sort((a,b) => a.x - b.x);
+            
+            const mapX = x => x * (w / 255);
+            const mapY = y => y * (h / 255);
+
+            cCtx.moveTo(mapX(pts[0].x), mapY(pts[0].y));
+            for(let i=1; i<pts.length; i++) {
+                cCtx.lineTo(mapX(pts[i].x), mapY(pts[i].y));
+            }
+            cCtx.stroke();
+
+            cCtx.fillStyle = '#a855f7';
+            pts.forEach(p => {
+                cCtx.beginPath(); cCtx.arc(mapX(p.x), mapY(p.y), 5, 0, Math.PI*2); cCtx.fill();
+            });
+        }
+
+        function createCurveLUT() {
+            let lut = new Uint8Array(256);
+            let pts = [...currentSettings.curvePoints].sort((a,b) => a.x - b.x);
+            let mapped = pts.map(p => ({ x: p.x, y: 255 - p.y }));
+            
+            let pIndex = 0;
+            for(let i=0; i<256; i++) {
+                if(i > mapped[pIndex+1]?.x && pIndex < mapped.length - 2) pIndex++;
+                let p1 = mapped[pIndex], p2 = mapped[pIndex+1];
+                if(!p2) { lut[i] = p1.y; continue; }
+                let t = Math.max(0, Math.min(1, (i - p1.x) / (p2.x - p1.x))); 
+                lut[i] = p1.y + t * (p2.y - p1.y);
+            }
+            return lut;
+        }
+
+        cCanvas.addEventListener('pointerdown', (e) => {
+            const rect = cCanvas.getBoundingClientRect();
+            let x = (e.clientX - rect.left) * (255 / cCanvas.width);
+            let y = (e.clientY - rect.top) * (255 / cCanvas.height);
+            
+            dragPoint = currentSettings.curvePoints.find(p => Math.hypot(p.x - x, p.y - y) < 20);
+            if(!dragPoint) {
+                dragPoint = { x: Math.max(0, Math.min(255, x)), y: Math.max(0, Math.min(255, y)) };
+                currentSettings.curvePoints.push(dragPoint);
+            }
+            drawCurveGrid(); applyFilters();
+        });
+
+        cCanvas.addEventListener('pointermove', (e) => {
+            if(dragPoint) {
+                const rect = cCanvas.getBoundingClientRect();
+                dragPoint.x = Math.max(0, Math.min(255, (e.clientX - rect.left) * (255 / cCanvas.width)));
+                dragPoint.y = Math.max(0, Math.min(255, (e.clientY - rect.top) * (255 / cCanvas.height)));
+                if(dragPoint === currentSettings.curvePoints[0]) dragPoint.x = 0;
+                let lastP = currentSettings.curvePoints.reduce((a,b)=>a.x>b.x?a:b);
+                if(dragPoint === lastP) dragPoint.x = 255;
+                drawCurveGrid(); applyFilters();
+            }
+        });
+
+        window.addEventListener('pointerup', () => { if(dragPoint) { saveHistoryState(); dragPoint = null; } });
+        document.getElementById('btnResetCurve').addEventListener('click', () => {
+            currentSettings.curvePoints = [{x: 0, y: 255}, {x: 128, y: 127}, {x: 255, y: 0}];
+            drawCurveGrid(); applyFilters(); saveHistoryState();
+        });
+        
+        setTimeout(resizeCurveCanvas, 100);
+
+        // --- Cropper.js 연동 ---
+        const cropperImage = document.getElementById('cropperImage');
+        let currentRatioValue = NaN;
+        let isLandscape = true;
+        let baseRotation = 0; // 90도씩 회전되는 기준점 보관
+
+        function initCropper() {
+            canvas.classList.add('hidden');
+            cropperImage.src = canvas.toDataURL('image/png');
+            cropperImage.classList.remove('hidden');
+            cropper = new Cropper(cropperImage, { 
+                viewMode: 1, dragMode: 'crop', background: false, autoCropArea: 1, responsive: true 
+            });
+            // 초기화 시 기울기 슬라이더 0으로
+            document.getElementById('slTilt').value = 0;
+            document.getElementById('valTilt').innerText = '0°';
+            baseRotation = 0;
+        }
+        function destroyCropper() {
+            if(cropper) { cropper.destroy(); cropper = null; cropperImage.classList.add('hidden'); canvas.classList.remove('hidden'); }
+        }
+
+        // 가로/세로 방향 토글
+        document.getElementById('btnRatioLand').addEventListener('click', (e) => {
+            isLandscape = true;
+            e.target.classList.add('bg-white/30');
+            document.getElementById('btnRatioPort').classList.remove('bg-white/30');
+            applyCropperRatio();
+        });
+        document.getElementById('btnRatioPort').addEventListener('click', (e) => {
+            isLandscape = false;
+            e.target.classList.add('bg-white/30');
+            document.getElementById('btnRatioLand').classList.remove('bg-white/30');
+            applyCropperRatio();
+        });
+
+        function applyCropperRatio() {
+            if(cropper) {
+                if(isNaN(currentRatioValue)) {
+                    cropper.setAspectRatio(NaN);
+                } else {
+                    cropper.setAspectRatio(isLandscape ? currentRatioValue : 1 / currentRatioValue);
+                }
+            }
+        }
+
+        document.querySelectorAll('.crop-ratio').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                currentRatioValue = parseFloat(e.target.dataset.ratio);
+                applyCropperRatio();
+                document.querySelectorAll('.crop-ratio').forEach(b => b.classList.remove('bg-white/30'));
+                e.target.classList.add('bg-white/30');
+            });
+        });
+
+        // 90도 회전
+        document.getElementById('btnRotate').addEventListener('click', () => { 
+            if(cropper) {
+                baseRotation += 90;
+                let currentTilt = parseFloat(document.getElementById('slTilt').value) || 0;
+                cropper.rotateTo(baseRotation + currentTilt); 
+            }
+        });
+
+        // 좌우/상하 반전
+        let flipX = -1;
+        let flipY = -1;
+        document.getElementById('btnFlipX').addEventListener('click', () => { if(cropper) { cropper.scaleX(flipX); flipX = flipX === -1 ? 1 : -1; } });
+        document.getElementById('btnFlipY').addEventListener('click', () => { if(cropper) { cropper.scaleY(flipY); flipY = flipY === -1 ? 1 : -1; } });
+
+        // 기울기 조절 슬라이더
+        document.getElementById('slTilt').addEventListener('input', (e) => {
+            let tiltVal = parseFloat(e.target.value);
+            document.getElementById('valTilt').innerText = tiltVal + '°';
+            if(cropper) {
+                cropper.rotateTo(baseRotation + tiltVal);
+            }
+        });
+
+        document.getElementById('btnApplyCrop').addEventListener('click', () => {
+            if(!cropper) return;
+            const croppedCanvas = cropper.getCroppedCanvas();
+            canvas.width = croppedCanvas.width; canvas.height = croppedCanvas.height;
+            ctx.drawImage(croppedCanvas, 0, 0);
+            baseImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            // 크롭 후 슬라이더 리셋
+            resetAllSliders(); 
+            document.getElementById('slTilt').value = 0;
+            document.getElementById('valTilt').innerText = '0°';
+            baseRotation = 0;
+
+            destroyCropper(); saveHistoryState();
+            document.querySelector('[data-target="panelLight"]').click();
+        });
+
+        // --- UI 네비게이션 & 히스토리 ---
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.replace('text-purple-400', 'text-gray-400'));
+                btn.classList.replace('text-gray-400', 'text-purple-400');
+                document.querySelectorAll('.control-view').forEach(panel => panel.classList.add('hidden-menu'));
+                const target = btn.getAttribute('data-target');
+                document.getElementById(target).classList.remove('hidden-menu');
+                if(target === 'panelCrop') initCropper(); else if(cropper) destroyCropper();
+            });
+        });
+
+        function saveHistoryState() {
+            if(!baseImageData) return;
+            const state = { imageData: ctx.getImageData(0, 0, canvas.width, canvas.height), settings: JSON.parse(JSON.stringify(currentSettings)) };
+            historyStack.splice(historyIndex + 1); historyStack.push(state);
+            if (historyStack.length > 8) historyStack.shift(); else historyIndex++;
+            updateHistoryButtons();
+        }
+
+        function restoreHistory(index) {
+            if (index < 0 || index >= historyStack.length) return;
+            historyIndex = index;
+            const state = historyStack[historyIndex];
+            canvas.width = state.imageData.width; canvas.height = state.imageData.height;
+            ctx.putImageData(state.imageData, 0, 0); baseImageData = state.imageData;
+            currentSettings = JSON.parse(JSON.stringify(state.settings));
+            
+            sliderKeys.forEach(key => {
+                let sl = document.getElementById('sl' + key);
+                let val = currentSettings[key.toLowerCase()];
+                if(sl) { sl.value = val; document.getElementById('val' + key).innerText = val; }
+            });
+            drawCurveGrid(); updateHistoryButtons();
+        }
+
+        function updateHistoryButtons() {
+            document.getElementById('btnUndo').classList.toggle('pointer-events-none', historyIndex <= 0);
+            document.getElementById('btnUndo').classList.toggle('text-white/50', historyIndex <= 0);
+            document.getElementById('btnRedo').classList.toggle('pointer-events-none', historyIndex >= historyStack.length - 1);
+            document.getElementById('btnRedo').classList.toggle('text-white/50', historyIndex >= historyStack.length - 1);
+        }
+
+        document.getElementById('btnUndo').addEventListener('click', () => restoreHistory(historyIndex - 1));
+        document.getElementById('btnRedo').addEventListener('click', () => restoreHistory(historyIndex + 1));
+
+        // --- Export & Modal ---
+        const exportModal = document.getElementById('exportModal');
+        
+        document.getElementById('btnSave').addEventListener('click', () => {
+            exportModal.classList.remove('hidden');
+        });
+
+        document.getElementById('btnCancelExport').addEventListener('click', () => {
+            exportModal.classList.add('hidden');
+        });
+
+        document.getElementById('btnConfirmExport').addEventListener('click', () => {
+            const format = document.getElementById('exportFormat').value;
+            const scale = parseFloat(document.getElementById('exportScale').value);
+            
+            // 해상도 조절을 위한 임시 캔버스 생성
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvas.width * scale;
+            tempCanvas.height = canvas.height * scale;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // 스케일 적용하여 그리기
+            tempCtx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
+
+            // 확장자 설정
+            let ext = 'png';
+            if(format === 'image/jpeg') ext = 'jpg';
+            else if(format === 'image/webp') ext = 'webp';
+
+            const link = document.createElement('a');
+            link.download = `${originalFileName}_Edited.${ext}`;
+            link.href = tempCanvas.toDataURL(format, 0.9); // JPEG, WEBP 화질 90%
+            link.click();
+            
+            exportModal.classList.add('hidden');
+        });
+    </script>
+</body>
+</html>
